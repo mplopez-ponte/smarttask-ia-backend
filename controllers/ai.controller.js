@@ -154,6 +154,7 @@ Responde solo con la descripción, sin introducciones ni explicaciones.`;
 
     res.json({ descripcion: completion.choices[0].message.content.trim() });
   } catch (error) {
+      console.error('Error sugerirDescripcion:', error.message); // ← añade esto
     res.status(500).json({ error: 'Error al generar la descripción.' });
   }
 };
