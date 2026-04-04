@@ -15,6 +15,14 @@ const statsRoutes = require('./routes/stats.routes');
 
 const app = express();
 
+// CORS
+app.use(cors({
+  origin: 'https://smarttask-ia-frontend-production.up.railway.app',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+}));
+
 // Helmet configurado para permitir assets de Swagger UI
 app.use(
   helmet({
@@ -24,7 +32,10 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
         styleSrc: ["'self'", "'unsafe-inline'", 'cdn.jsdelivr.net'],
         imgSrc: ["'self'", 'data:', 'cdn.jsdelivr.net'],
-        connectSrc: ["'self'"],
+        connectSrc: [
+          "'self'",
+          'https://smarttask-ia-frontend-production.up.railway.app'
+        ],
       },
     },
   })
@@ -45,14 +56,6 @@ const aiLimiter = rateLimit({
   max: 10,
   message: { error: 'Límite de solicitudes IA alcanzado, espera un momento.' }
 });
-
-// CORS
-app.use(cors({
-  origin: 'https://smarttask-ia-frontend-production.up.railway.app',
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
 
 // Body Parser
 app.use(express.json({ limit: '10kb' }));
