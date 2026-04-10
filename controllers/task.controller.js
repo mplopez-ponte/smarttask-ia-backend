@@ -50,18 +50,37 @@ const obtenerTarea = async (req, res) => {
 // ─── POST /api/tasks ─────────────────────────────────────
 const crearTarea = async (req, res) => {
   try {
+    // 1. Verificación de Express-Validator
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
 
-    const { titulo, descripcion, prioridad, categoria, etiquetas, fechaVencimiento } = req.body;
+    // 2. Extraer con valores por defecto para evitar errores de Mongoose
+    const { 
+      titulo, 
+      descripcion = "", 
+      prioridad = "media", 
+      categoria = "General", 
+      etiquetas = [], 
+      fechaVencimiento 
+    } = req.body;
+
+    // 3. Crear tarea vinculada al usuario
     const tarea = await Tarea.create({
-      titulo, descripcion, prioridad, categoria, etiquetas,
-      fechaVencimiento, usuario: req.usuario._id
+      titulo: titulo.trim(),
+      descripcion,
+      prioridad,
+      categoria,
+      etiquetas,
+      fechaVencimiento: fechaVencimiento || new Date(Date.now() + 86400000), // Mañana por defecto
+      usuario: req.usuario._id
     });
+
     res.status(201).json({ mensaje: 'Tarea creada correctamente.', tarea });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Error al crear la tarea.' });
+    console.error(" [BACKEND ERROR]:", error);
+    res.status(500).json({ error: 'Error al crear la tarea en la base de datos.' });
   }
 };
 
