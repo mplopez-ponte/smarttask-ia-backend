@@ -1,139 +1,140 @@
 const Tarea = require('../models/Task.model');
 
-const DUCK_MODEL = 'gpt-4o-mini';
-const DUCK_STATUS_URL = 'https://duckduckgo.com/duckchat/v1/status';
-const DUCK_CHAT_URL   = 'https://duckduckgo.com/duckchat/v1/chat';
-
-// Headers que imitan un navegador real de forma precisa
-const getHeaders = (vqd = null) => {
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'Accept': 'text/event-stream',
-    'Accept-Language': 'es-ES,es;q=0.9',
-    'Referer': 'https://duckduckgo.com/',
-    'Origin': 'https://duckduckgo.com',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-origin',
-    'x-vqd-accept': '1',
-  };
-  if (vqd) headers['x-vqd-4'] = vqd;
-  return headers;
-};
-
 /**
- * Obtiene el token VQD con lógica de reintento
+ * Función central para conectar con Groq Cloud.
+ * Usamos Llama 3.3 70B por su excelente equilibrio entre razonamiento y velocidad.
  */
-async function getVqdToken() {
+async function groqChat(userPrompt, isJson = false) {
   try {
-    // Pedimos la página principal, que suele estar menos vigilada que el endpoint /status
-    const res = await fetch(`https://duckduckgo.com/?q=DuckDuckGo+AI+Chat&nc=${Date.now()}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'Accept': 'text/html',
-        'Cache-Control': 'no-cache'
-      }
-    });
-
-    const text = await res.text();
-    // Buscamos la variable vqd="TOKEN" dentro del código fuente de la página
-    const match = text.match(/vqd=["']([^"']+)["']/);
-    
-    if (!match || !match[1]) {
-      throw new Error('Bloqueo total de IP en Railway por parte de DuckDuckGo');
+    const apiKey = process.env.GROQ_API_KEY;
+    if (!apiKey) {
+      throw new Error('La variable GROQ_API_KEY no está configurada en Railway.');
     }
 
-    return match[1];
-  } catch (err) {
-    console.error(' [!] Error crítico:', err.message);
-    throw err;
-  }
-}
+    const payload = {
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        {
+          role: "system",
+          content: "Eres un asistente experto en productividad para la aplicación SmartTask IA. " +
+                   (isJson ? "Responde exclusivamente en formato JSON válido." : "Responde de forma concisa y motivadora en español.")
+        },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.7,
+    };
 
-/**
- * Chat con Duck.ai optimizado para Railway
- */
-async function duckChat(userPrompt) {
-  try {
-    const vqd = await getVqdToken();
-    const res = await fetch(DUCK_CHAT_URL, {
+    // Si esperamos un JSON, forzamos el modo respuesta de Groq
+    if (isJson) {
+      payload.response_format = { type: "json_object" };
+    }
+
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
-      headers: getHeaders(vqd),
-      body: JSON.stringify({
-        model: DUCK_MODEL,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
     });
 
-    if (!res.ok) throw new Error(`Status ${res.status}`);
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(`Groq API Error: ${errorData.error?.message || res.statusText}`);
+    }
 
-    const raw = await res.text();
-    let fullText = '';
-
-    raw.split('\n').forEach(line => {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') return;
-        try {
-          const json = JSON.parse(data);
-          fullText += json.message || '';
-        } catch (e) {}
-      }
-    });
-
-    return fullText.trim();
+    const data = await res.json();
+    return data.choices[0].message.content;
   } catch (error) {
-    console.error(' [!] Error crítico en comunicación con Duck.ai:', error.message);
+    console.error(' [!] Error en comunicación con Groq:', error.message);
     throw error;
   }
 }
 
-// --- CONTROLADORES ---
+// ─── CONTROLADORES ──────────────────────────────────────────
 
+/**
+ * POST /api/ai/generar-subtareas
+ */
 const generarSubtareas = async (req, res) => {
   try {
     const { tareaId } = req.body;
     const tarea = await Tarea.findOne({ _id: tareaId, usuario: req.usuario._id });
+
     if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada.' });
 
-    const prompt = `Actúa como asistente de productividad. Tarea: "${tarea.titulo}". Genera un JSON: {"subtareas": [{"titulo": "...", "descripcion": "...", "orden": 1}], "consejo": "..."}. Responde SOLO el JSON.`;
+    const prompt = `Analiza la tarea: "${tarea.titulo}". Descripción: ${tarea.descripcion || 'N/A'}. 
+    Prioridad: ${tarea.prioridad}. 
+    Genera un JSON con este formato exacto: 
+    {
+      "subtareas": [{"titulo": "nombre", "descripcion": "acción", "orden": 1}],
+      "consejo": "frase corta motivadora"
+    }`;
 
-    const response = await duckChat(prompt);
-    // Limpieza de Markdown
-    const cleanJson = response.replace(/```json|```/gi, '').trim();
-    const data = JSON.parse(cleanJson);
+    const rawResponse = await groqChat(prompt, true);
+    const data = JSON.parse(rawResponse);
 
-    tarea.subtareas = data.subtareas.map((s, i) => ({ ...s, completada: false, orden: s.orden || i + 1 }));
+    tarea.subtareas = data.subtareas.map((s, i) => ({
+      titulo: s.titulo,
+      descripcion: s.descripcion,
+      completada: false,
+      orden: s.orden || i + 1
+    }));
     tarea.subtareasGeneradasPorIA = true;
+    
     await tarea.save();
 
-    res.json({ mensaje: 'Éxito', subtareas: tarea.subtareas, consejo: data.consejo });
+    res.json({
+      mensaje: 'Subtareas generadas con éxito',
+      subtareas: tarea.subtareas,
+      consejo: data.consejo
+    });
   } catch (error) {
-    res.status(500).json({ error: 'La IA está saturada. Inténtalo en un momento.' });
+    res.status(500).json({ error: 'No se pudieron generar subtareas. Revisa la API Key.' });
   }
 };
 
+/**
+ * POST /api/ai/analizar-carga
+ */
 const analizarCargaTrabajo = async (req, res) => {
   try {
-    const tareas = await Tarea.find({ usuario: req.usuario._id, estado: { $in: ['pendiente', 'en_progreso'] } });
-    if (!tareas.length) return res.json({ analisis: 'Sin tareas pendientes.' });
+    const tareas = await Tarea.find({
+      usuario: req.usuario._id,
+      estado: { $in: ['pendiente', 'en_progreso'] }
+    }).select('titulo prioridad');
 
-    const prompt = `Analiza estas tareas y da consejos breves en español: ${JSON.stringify(tareas.map(t => t.titulo))}`;
-    const analisis = await duckChat(prompt);
+    if (tareas.length === 0) {
+      return res.json({ analisis: '¡Bandeja de entrada vacía! Es un buen momento para planificar.' });
+    }
 
-    res.json({ analisis, totalTareasPendientes: tareas.length });
+    const prompt = `Analiza mi carga de trabajo actual: ${JSON.stringify(tareas)}. 
+    Dime brevemente (máximo 100 palabras) qué debería priorizar hoy y dame un consejo de coach de productividad.`;
+
+    const analisis = await groqChat(prompt);
+
+    res.json({
+      analisis,
+      totalTareasPendientes: tareas.length
+    });
   } catch (error) {
-    res.status(500).json({ error: 'No se pudo obtener el análisis de IA.' });
+    res.status(500).json({ error: 'Error al analizar la carga de trabajo.' });
   }
 };
 
+/**
+ * POST /api/ai/sugerir-descripcion
+ */
 const sugerirDescripcion = async (req, res) => {
   try {
-    const { titulo } = req.body;
-    const desc = await duckChat(`Escribe una descripción de 2 líneas para: "${titulo}". Solo el texto.`);
-    res.json({ descripcion: desc });
+    const { titulo, categoria } = req.body;
+    const prompt = `Escribe una descripción profesional de máximo 2 oraciones para la tarea: "${titulo}" en la categoría "${categoria}".`;
+
+    const descripcion = await groqChat(prompt);
+
+    res.json({ descripcion: descripcion.trim() });
   } catch (error) {
-    res.status(500).json({ error: 'Error al sugerir descripción.' });
+    res.status(500).json({ error: 'Error al generar la descripción sugerida.' });
   }
 };
 
