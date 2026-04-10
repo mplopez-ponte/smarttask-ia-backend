@@ -50,53 +50,18 @@ const obtenerTarea = async (req, res) => {
 // ─── POST /api/tasks ─────────────────────────────────────
 const crearTarea = async (req, res) => {
   try {
-    // 1. Verificar errores de validación (express-validator)
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    // 2. Desestructuración de datos del cuerpo de la petición
-    const { 
-      titulo, 
-      descripcion, 
-      prioridad, 
-      categoria, 
-      etiquetas, 
-      fechaVencimiento 
-    } = req.body;
-
-    // 3. Creación de la tarea
-    // Usamos await Tarea.create para que sea directo y limpio
+    const { titulo, descripcion, prioridad, categoria, etiquetas, fechaVencimiento } = req.body;
     const tarea = await Tarea.create({
-      titulo: titulo.trim(),
-      descripcion: descripcion || '',
-      prioridad: prioridad || 'media',
-      categoria: categoria || 'General',
-      etiquetas: etiquetas || [],
-      fechaVencimiento: fechaVencimiento || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 días vista por defecto
-      usuario: req.usuario._id // Extraído del middleware de autenticación (JWT)
+      titulo, descripcion, prioridad, categoria, etiquetas,
+      fechaVencimiento, usuario: req.usuario._id
     });
-
-    // 4. Respuesta al cliente
-    res.status(201).json({ 
-      mensaje: 'Tarea creada correctamente.', 
-      tarea 
-    });
-
+    res.status(201).json({ mensaje: 'Tarea creada correctamente.', tarea });
   } catch (error) {
-    // Log detallado en la consola de Railway para depuración
-    console.error(' [!] Error al crear tarea:', error);
-
-    // Si el error es de validación de Mongoose (campos requeridos, tipos, etc.)
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
-        error: 'Datos de tarea inválidos.', 
-        detalles: error.message 
-      });
-    }
-
-    res.status(500).json({ error: 'Error interno al crear la tarea.' });
+    console.error(error);
+    res.status(500).json({ error: 'Error al crear la tarea.' });
   }
 };
 
