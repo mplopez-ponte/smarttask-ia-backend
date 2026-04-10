@@ -1,7 +1,67 @@
-const OpenAI = require('openai');
 const Tarea = require('../models/Task.model');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// ─── Duck.ai client ──────────────────────────────────────
+// Modelos disponibles: gpt-4o-mini | claude-3-haiku-20240307 | meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo | mistralai/Mixtral-8x7B-Instruct-v0.1
+const DUCK_MODEL = 'gpt-4o-mini';
+const DUCK_STATUS_URL = 'https://duckduckgo.com/duckchat/v1/status';
+const DUCK_CHAT_URL   = 'https://duckduckgo.com/duckchat/v1/chat';
+
+async function getVqdToken() {
+  const res = await fetch(DUCK_STATUS_URL, {
+    headers: {
+      'x-vqd-accept': '1',
+      'User-Agent': 'Mozilla/5.0',
+    },
+  });
+  const token = res.headers.get('x-vqd-4');
+  if (!token) throw new Error('No se pudo obtener el token VQD de duck.ai');
+  return token;
+}
+
+/**
+ * Llama a duck.ai con un prompt de usuario y devuelve el texto completo.
+ * @param {string} userPrompt
+ * @returns {Promise<string>}
+ */
+async function duckChat(userPrompt) {
+  const vqd = await getVqdToken();
+
+  const res = await fetch(DUCK_CHAT_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-vqd-4': vqd,
+      'User-Agent': 'Mozilla/5.0',
+    },
+    body: JSON.stringify({
+      model: DUCK_MODEL,
+      messages: [{ role: 'user', content: userPrompt }],
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`duck.ai error ${res.status}: ${text}`);
+  }
+
+  // La respuesta es un stream SSE — leemos y concatenamos los chunks
+  const raw = await res.text();
+  let fullText = '';
+
+  for (const line of raw.split('\n')) {
+    if (!line.startsWith('data: ')) continue;
+    const payload = line.slice(6).trim();
+    if (payload === '[DONE]') break;
+    try {
+      const json = JSON.parse(payload);
+      fullText += json?.message ?? '';
+    } catch {
+      // chunk no parseable, ignorar
+    }
+  }
+
+  return fullText;
+}
 
 // ─── POST /api/ai/generar-subtareas ──────────────────────
 const generarSubtareas = async (req, res) => {
@@ -11,7 +71,6 @@ const generarSubtareas = async (req, res) => {
     const tarea = await Tarea.findOne({ _id: tareaId, usuario: req.usuario._id });
     if (!tarea) return res.status(404).json({ error: 'Tarea no encontrada.' });
 
-    // Calcular días restantes
     const hoy = new Date();
     const diasRestantes = Math.ceil((tarea.fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
 
@@ -43,22 +102,18 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
   "consejo": "Un consejo breve y práctico para completar la tarea a tiempo"
 }`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      max_tokens: 1000,
-      response_format: { type: 'json_object' }
-    });
+    const rawText = await duckChat(prompt);
 
-    const respuesta = JSON.parse(completion.choices[0].message.content);
+    // Extraer JSON aunque venga envuelto en bloques markdown
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new SyntaxError('Respuesta sin JSON válido');
+    const respuesta = JSON.parse(jsonMatch[0]);
 
-    // Guardar subtareas en la tarea
     tarea.subtareas = respuesta.subtareas.map((s, i) => ({
       titulo: s.titulo,
       descripcion: s.descripcion,
       completada: false,
-      orden: s.orden || i + 1
+      orden: s.orden || i + 1,
     }));
     tarea.subtareasGeneradasPorIA = true;
     await tarea.save();
@@ -67,7 +122,6 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
       mensaje: 'Subtareas generadas por IA correctamente.',
       subtareas: tarea.subtareas,
       consejo: respuesta.consejo,
-      tokensUsados: completion.usage.total_tokens
     });
   } catch (error) {
     console.error('Error generando subtareas:', error);
@@ -83,7 +137,7 @@ const analizarCargaTrabajo = async (req, res) => {
   try {
     const tareas = await Tarea.find({
       usuario: req.usuario._id,
-      estado: { $in: ['pendiente', 'en_progreso'] }
+      estado: { $in: ['pendiente', 'en_progreso'] },
     }).select('titulo prioridad fechaVencimiento estado progreso');
 
     if (tareas.length === 0) {
@@ -94,7 +148,7 @@ const analizarCargaTrabajo = async (req, res) => {
       titulo: t.titulo,
       prioridad: t.prioridad,
       diasRestantes: Math.ceil((t.fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24)),
-      progreso: t.progreso + '%'
+      progreso: t.progreso + '%',
     }));
 
     const prompt = `Eres un coach de productividad. Analiza esta carga de trabajo y da recomendaciones:
@@ -109,16 +163,11 @@ Proporciona:
 
 Sé directo, práctico y motivador. Responde en español, máximo 200 palabras.`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.8,
-      max_tokens: 400
-    });
+    const analisis = await duckChat(prompt);
 
     res.json({
-      analisis: completion.choices[0].message.content,
-      totalTareasPendientes: tareas.length
+      analisis,
+      totalTareasPendientes: tareas.length,
     });
   } catch (error) {
     console.error('Error analizando carga:', error);
@@ -145,16 +194,11 @@ La descripción debe:
 
 Responde solo con la descripción, sin introducciones ni explicaciones.`;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
-      temperature: 0.7,
-      max_tokens: 150
-    });
+    const descripcion = await duckChat(prompt);
 
-    res.json({ descripcion: completion.choices[0].message.content.trim() });
+    res.json({ descripcion: descripcion.trim() });
   } catch (error) {
-      console.error('Error sugerirDescripcion:', error.message); // ← añade esto
+    console.error('Error sugerirDescripcion:', error.message);
     res.status(500).json({ error: 'Error al generar la descripción.' });
   }
 };
