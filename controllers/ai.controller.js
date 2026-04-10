@@ -24,20 +24,30 @@ const getHeaders = (vqd = null) => {
 /**
  * Obtiene el token VQD con lógica de reintento
  */
-async function getVqdToken(retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(DUCK_STATUS_URL, { headers: getHeaders() });
-      const token = res.headers.get('x-vqd-4');
-      if (token) return token;
-      
-      // Si no hay token, esperamos un poco antes de reintentar
-      await new Promise(resolve => setTimeout(resolve, 1000));
-    } catch (err) {
-      if (i === retries - 1) throw err;
+async function getVqdToken() {
+  try {
+    // Pedimos la página principal, que suele estar menos vigilada que el endpoint /status
+    const res = await fetch(`https://duckduckgo.com/?q=DuckDuckGo+AI+Chat&nc=${Date.now()}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Accept': 'text/html',
+        'Cache-Control': 'no-cache'
+      }
+    });
+
+    const text = await res.text();
+    // Buscamos la variable vqd="TOKEN" dentro del código fuente de la página
+    const match = text.match(/vqd=["']([^"']+)["']/);
+    
+    if (!match || !match[1]) {
+      throw new Error('Bloqueo total de IP en Railway por parte de DuckDuckGo');
     }
+
+    return match[1];
+  } catch (err) {
+    console.error(' [!] Error crítico:', err.message);
+    throw err;
   }
-  throw new Error('VQD token no encontrado tras reintentos');
 }
 
 /**
