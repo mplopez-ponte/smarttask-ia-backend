@@ -7,7 +7,7 @@ Proyecto Final — Ciclo Formativo de Grado Superior de Desarrollo de Aplicacion
 
 ## 📋 Descripción
 
-SmartTask IA es una aplicación web full-stack para la gestión de tareas con inteligencia artificial integrada. Permite a los usuarios organizar sus tareas, generar subtareas automáticamente con OpenAI según la prioridad y fecha de vencimiento, y visualizar estadísticas de productividad en un dashboard interactivo.
+SmartTask IA es una aplicación web full-stack para la gestión de tareas con inteligencia artificial integrada. Permite a los usuarios organizar sus tareas, generar subtareas automáticamente con el módulo de la IA de Duck.ia según la prioridad y fecha de vencimiento, y visualizar estadísticas de productividad en un dashboard interactivo.
 
 ---
 
@@ -22,7 +22,7 @@ SmartTask IA es una aplicación web full-stack para la gestión de tareas con in
 | Mongoose | 8 | ODM para MongoDB |
 | JWT (jsonwebtoken) | 9 | Autenticación stateless |
 | bcryptjs | 2.4 | Hash de contraseñas |
-| OpenAI SDK | 4.24 | Integración con GPT-4o-mini |
+| Duck.ai | DuckDuckGo AI 
 | Helmet | 7 | Headers de seguridad HTTP |
 | express-rate-limit | 7 | Protección contra abuso |
 | express-validator | 7 | Validación de datos |
@@ -48,7 +48,7 @@ smarttask-ia/
 │   ├── controllers/
 │   │   ├── auth.controller.js    # Registro, login, perfil
 │   │   ├── task.controller.js    # CRUD de tareas
-│   │   ├── ai.controller.js      # Integración OpenAI
+│   │   ├── ai.controller.js      # Integración DuckDuckGo AI
 │   │   └── stats.controller.js   # Estadísticas con aggregation
 │   ├── middleware/
 │   │   └── auth.middleware.js    # JWT verification
