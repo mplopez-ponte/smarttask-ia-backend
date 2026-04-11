@@ -15,6 +15,9 @@ const statsRoutes = require('./routes/stats.routes');
 
 const app = express();
 
+// AÑADE ESTA LÍNEA AQUÍ (Crucial para Railway)
+app.set('trust proxy', 1);
+
 // CORS
 app.use(cors({
   origin: 'https://smarttask-ia-frontend-production.up.railway.app',
@@ -22,9 +25,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
-
-// AÑADE ESTA LÍNEA AQUÍ (Crucial para Railway)
-app.set('trust proxy', 1);
 
 // Helmet configurado para permitir assets de Swagger UI
 app.use(
