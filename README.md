@@ -140,7 +140,7 @@ smarttask-ia/
 ### Prerrequisitos
 - Node.js ≥ 18
 - MongoDB local o cuenta en [MongoDB Atlas](https://cloud.mongodb.com)
-- URL base es https://duckduckgo.com/duckchat/v1/chat
+- Uso de las API Key de Groq
 
 ### 1. Clonar el repositorio
 ```bash
