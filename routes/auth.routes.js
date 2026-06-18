@@ -7,27 +7,58 @@ const {
 } = require('../controllers/auth.controller');
 const { protegerRuta } = require('../middleware/auth.middleware');
 
-// Validaciones
+// ─── Regex de contraseña alfanumérica ────────────────────
+// Mínimo 6 caracteres, al menos 1 letra y 1 número
+const passwordRegex = /^(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d@$!%*?&_\-]{6,}$/;
+const passwordMsg   = 'La contraseña debe tener mínimo 6 caracteres, al menos una letra y un número';
+
+// ─── Validaciones ────────────────────────────────────────
 const validarRegistro = [
-  body('nombre').trim().isLength({ min: 2, max: 50 }).withMessage('El nombre debe tener entre 2 y 50 caracteres'),
-  body('email').isEmail().normalizeEmail().withMessage('Email no válido'),
-  body('password').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
+  body('nombre')
+    .trim()
+    .isLength({ min: 2, max: 50 })
+    .withMessage('El nombre debe tener entre 2 y 50 caracteres'),
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Email no válido'),
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('La contraseña debe tener al menos 6 caracteres')
+    .matches(passwordRegex)
+    .withMessage(passwordMsg),
 ];
 
 const validarLogin = [
-  body('email').isEmail().normalizeEmail().withMessage('Email no válido'),
-  body('password').notEmpty().withMessage('La contraseña es obligatoria')
+  body('email')
+    .isEmail()
+    .normalizeEmail()
+    .withMessage('Email no válido'),
+  body('password')
+    .notEmpty()
+    .withMessage('La contraseña es obligatoria'),
+];
+
+const validarCambiarPassword = [
+  body('passwordNueva')
+    .isLength({ min: 6 })
+    .withMessage('La contraseña debe tener al menos 6 caracteres')
+    .matches(passwordRegex)
+    .withMessage(passwordMsg),
 ];
 
 const validarEliminarCuenta = [
-  body('password').notEmpty().withMessage('Debes confirmar tu contraseña')
+  body('password')
+    .notEmpty()
+    .withMessage('Debes confirmar tu contraseña'),
 ];
 
-router.post('/registro',          validarRegistro,        registro);
-router.post('/login',             validarLogin,           login);
-router.get('/perfil',             protegerRuta,           obtenerPerfil);
-router.put('/perfil',             protegerRuta,           actualizarPerfil);
-router.put('/cambiar-password',   protegerRuta,           cambiarPassword);
-router.delete('/cuenta',          protegerRuta, validarEliminarCuenta, eliminarCuenta);
+// ─── Rutas ───────────────────────────────────────────────
+router.post('/registro',        validarRegistro,        registro);
+router.post('/login',           validarLogin,           login);
+router.get('/perfil',           protegerRuta,           obtenerPerfil);
+router.put('/perfil',           protegerRuta,           actualizarPerfil);
+router.put('/cambiar-password', protegerRuta, validarCambiarPassword, cambiarPassword);
+router.delete('/cuenta',        protegerRuta, validarEliminarCuenta,  eliminarCuenta);
 
 module.exports = router;
