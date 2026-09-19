@@ -8,12 +8,16 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@google/genai": "^2.23.0",
+    "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
+    "genai": "^0.0.18",
+    "generative-ai": "^0.1.4",
     "groq-sdk": "^1.1.2",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
@@ -27,5 +31,9 @@
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
+  },
+  "allowScripts": {
+    "@google/genai@2.23.0": true,
+    "@google/generative-ai@0.24.1": true
   }
 }

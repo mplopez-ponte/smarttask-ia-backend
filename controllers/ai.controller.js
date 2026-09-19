@@ -1,18 +1,20 @@
-const Groq = require('groq-sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const Tarea = require('../models/Task.model');
 
-// ─── Cliente Groq (compatible con API de OpenAI) ──────────
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// ─── Cliente Google Gemini ────────────────────────────────
+const apiKey = process.env.GEMINI_API_KEY;
+const genAI = new GoogleGenerativeAI(apiKey || '');
 
-// Modelo a usar — opciones gratuitas disponibles en Groq:
-//   'llama-3.1-8b-instant'   → más rápido, ideal para subtareas
-//   'llama-3.3-70b-versatile' → más potente, mejor razonamiento
-//   'mixtral-8x7b-32768'      → contexto largo
-const MODELO = 'llama-3.3-70b-versatile';
+// Modelo recomendado por Google para velocidad y tareas de texto:
+const MODELO = 'gemini-1.5-flash';
 
 // ─── POST /api/ai/generar-subtareas ──────────────────────
 const generarSubtareas = async (req, res) => {
   try {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'API Key de Gemini no configurada en el servidor.' });
+    }
+
     const { tareaId } = req.body;
 
     const tarea = await Tarea.findOne({ _id: tareaId, usuario: req.usuario._id });
@@ -20,7 +22,7 @@ const generarSubtareas = async (req, res) => {
 
     // Calcular días restantes
     const hoy = new Date();
-    const diasRestantes = Math.ceil((tarea.fechaVencimiento - hoy) / (1000 * 60 * 60 * 24));
+    const diasRestantes = Math.ceil((new Date(tarea.fechaVencimiento) - hoy) / (1000 * 60 * 60 * 24));
 
     const prompt = `Eres un asistente experto en gestión de proyectos y productividad.
 
@@ -29,7 +31,7 @@ Analiza la siguiente tarea y genera subtareas específicas y accionables:
 **Tarea:** "${tarea.titulo}"
 **Descripción:** ${tarea.descripcion || 'Sin descripción adicional'}
 **Prioridad:** ${tarea.prioridad}
-**Categoría:** ${tarea.categoria}
+**Categoría:** ${tarea.categoria || 'General'}
 **Días hasta vencimiento:** ${diasRestantes} días
 
 Teniendo en cuenta la prioridad "${tarea.prioridad}" y que quedan ${diasRestantes} días:
@@ -50,24 +52,19 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
   "consejo": "Un consejo breve y práctico para completar la tarea a tiempo"
 }`;
 
-    const completion = await groq.chat.completions.create({
+    // Configurar modelo de Gemini especificando tipo de respuesta JSON
+    const model = genAI.getGenerativeModel({
       model: MODELO,
-      messages: [
-        {
-          role: 'system',
-          content: 'Eres un asistente de gestión de tareas. Responde siempre con JSON válido y nada más. Sin markdown, sin bloques de código, sin texto adicional antes o después del JSON.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 1024,
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.7,
+      },
     });
 
-    // Limpiar posibles bloques de código markdown que algunos modelos añaden
-    let contenido = completion.choices[0].message.content.trim();
+    const result = await model.generateContent(prompt);
+    let contenido = result.response.text().trim();
+
+    // Limpiar posibles etiquetas markdown por seguridad
     contenido = contenido.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
 
     const respuesta = JSON.parse(contenido);
@@ -77,7 +74,7 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
       titulo: s.titulo,
       descripcion: s.descripcion,
       completada: false,
-      orden: s.orden || i + 1
+      orden: s.orden || i + 1,
     }));
     tarea.subtareasGeneradasPorIA = true;
     await tarea.save();
@@ -87,18 +84,11 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
       subtareas: tarea.subtareas,
       consejo: respuesta.consejo,
       modelo: MODELO,
-      tokensUsados: completion.usage?.total_tokens || 0
     });
   } catch (error) {
-    console.error('Error generando subtareas con Groq:', error?.message || error);
+    console.error('Error generando subtareas con Gemini:', error?.message || error);
     if (error instanceof SyntaxError) {
-      return res.status(500).json({ error: 'Error procesando la respuesta de la IA. Inténtalo de nuevo.' });
-    }
-    if (error?.status === 401) {
-      return res.status(500).json({ error: 'API key de Groq inválida. Verifica la variable GROQ_API_KEY.' });
-    }
-    if (error?.status === 429) {
-      return res.status(429).json({ error: 'Límite de la API de Groq alcanzado. Espera un momento.' });
+      return res.status(500).json({ error: 'Error procesando el formato JSON de la IA. Inténtalo de nuevo.' });
     }
     res.status(500).json({ error: 'Error al generar subtareas con IA.' });
   }
@@ -107,22 +97,26 @@ Responde ÚNICAMENTE con un JSON válido con esta estructura exacta (sin markdow
 // ─── GET /api/ai/analizar-carga ──────────────────────────
 const analizarCargaTrabajo = async (req, res) => {
   try {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'API Key de Gemini no configurada en el servidor.' });
+    }
+
     const tareas = await Tarea.find({
       usuario: req.usuario._id,
-      estado: { $in: ['pendiente', 'en_progreso'] }
+      estado: { $in: ['pendiente', 'en_progreso'] },
     }).select('titulo prioridad fechaVencimiento estado progreso');
 
     if (tareas.length === 0) {
       return res.json({
-        analisis: '¡No tienes tareas pendientes! Disfruta de tu tiempo libre. 🎉'
+        analisis: '¡No tienes tareas pendientes! Disfruta de tu tiempo libre. 🎉',
       });
     }
 
-    const resumenTareas = tareas.map(t => ({
+    const resumenTareas = tareas.map((t) => ({
       titulo: t.titulo,
       prioridad: t.prioridad,
-      diasRestantes: Math.ceil((t.fechaVencimiento - new Date()) / (1000 * 60 * 60 * 24)),
-      progreso: t.progreso + '%'
+      diasRestantes: Math.ceil((new Date(t.fechaVencimiento) - new Date()) / (1000 * 60 * 60 * 24)),
+      progreso: t.progreso + '%',
     }));
 
     const prompt = `Eres un coach de productividad. Analiza esta carga de trabajo y da recomendaciones en español:
@@ -137,35 +131,20 @@ Proporciona:
 
 Sé directo, práctico y motivador. Responde en español. Máximo 200 palabras.`;
 
-    const completion = await groq.chat.completions.create({
+    const model = genAI.getGenerativeModel({
       model: MODELO,
-      messages: [
-        {
-          role: 'system',
-          content: 'Eres un coach de productividad experto. Respondes siempre en español de forma clara, práctica y motivadora.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.8,
-      max_tokens: 512,
+      generationConfig: { temperature: 0.7 },
     });
 
+    const result = await model.generateContent(prompt);
+
     res.json({
-      analisis: completion.choices[0].message.content,
+      analisis: result.response.text(),
       totalTareasPendientes: tareas.length,
-      modelo: MODELO
+      modelo: MODELO,
     });
   } catch (error) {
-    console.error('Error analizando carga con Groq:', error?.message || error);
-    if (error?.status === 401) {
-      return res.status(500).json({ error: 'API key de Groq inválida. Verifica la variable GROQ_API_KEY.' });
-    }
-    if (error?.status === 429) {
-      return res.status(429).json({ error: 'Límite de la API de Groq alcanzado. Espera un momento.' });
-    }
+    console.error('Error analizando carga con Gemini:', error?.message || error);
     res.status(500).json({ error: 'Error al analizar la carga de trabajo.' });
   }
 };
@@ -173,7 +152,15 @@ Sé directo, práctico y motivador. Responde en español. Máximo 200 palabras.`
 // ─── POST /api/ai/sugerir-descripcion ───────────────────
 const sugerirDescripcion = async (req, res) => {
   try {
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'API Key de Gemini no configurada en el servidor.' });
+    }
+
     const { titulo, categoria, prioridad } = req.body;
+
+    if (!titulo || !titulo.trim()) {
+      return res.status(400).json({ error: 'El campo "titulo" es obligatorio.' });
+    }
 
     const prompt = `Genera una descripción concisa y profesional para esta tarea:
 
@@ -189,31 +176,19 @@ La descripción debe:
 
 Responde solo con la descripción, sin introducciones, sin comillas, sin texto adicional.`;
 
-    const completion = await groq.chat.completions.create({
+    const model = genAI.getGenerativeModel({
       model: MODELO,
-      messages: [
-        {
-          role: 'system',
-          content: 'Eres un asistente de gestión de proyectos. Generas descripciones profesionales y concisas en español. Respondes únicamente con la descripción solicitada, sin texto adicional.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.7,
-      max_tokens: 200,
+      generationConfig: { temperature: 0.6 },
     });
 
+    const result = await model.generateContent(prompt);
+
     res.json({
-      descripcion: completion.choices[0].message.content.trim(),
-      modelo: MODELO
+      descripcion: result.response.text().trim(),
+      modelo: MODELO,
     });
   } catch (error) {
-    console.error('Error sugiriendo descripción con Groq:', error?.message || error);
-    if (error?.status === 401) {
-      return res.status(500).json({ error: 'API key de Groq inválida. Verifica la variable GROQ_API_KEY.' });
-    }
+    console.error('Error sugiriendo descripción con Gemini:', error?.message || error);
     res.status(500).json({ error: 'Error al generar la descripción.' });
   }
 };
