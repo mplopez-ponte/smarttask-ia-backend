@@ -7,7 +7,7 @@ const {
 } = require('../controllers/ai.controller');
 
 // Importa tu middleware de autenticación (Ajusta la ruta según la estructura de tus carpetas)
-const authMiddleware = require('../middleware/auth.middleware');
+const { protegerRuta: authMiddleware } = require('../middleware/auth.middleware');
 
 /* ─── Rutas de Inteligencia Artificial (/api/ai) ───────────────────────── */
 
